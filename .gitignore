@@ -1,0 +1,13 @@
+# 파이썬
+__pycache__/
+*.pyc
+.venv/
+
+# 런타임 생성물 (매매 상태·결과·로그 — 코드 아님)
+state/
+results/
+*.log
+error_log.txt
+
+# macOS
+.DS_Store
