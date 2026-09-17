@@ -29,7 +29,14 @@ from risk_guard import CircuitBreaker
 STATE_DIR = Path(__file__).parent / "state"
 BRAINS = {"마라토너": MarathonerBrain, "스프린터": SprinterBrain, "파이오니어": PioneerBrain}
 MAX_POSITIONS = 5          # 트레이너당 최대 보유 종목 수(과집중 방지)
+CONV_MIN = 0.5             # 팀장 확신도 최소선. 팀장이 이보다 낮게 본 후보는 매수 보류(hold 취급)
 START = "2024-06-01"       # 지표 워밍업
+
+
+def keep_candidate(c):
+    """매수 후보를 남길지. 팀장 확신도가 CONV_MIN 미만이면 보류. conviction=None(팀장 부재)이면 통과(안전원칙)."""
+    conv = c.get("conviction")
+    return conv is None or conv >= CONV_MIN
 
 
 def _load(tname):
@@ -97,6 +104,8 @@ def run_trainer(tname, cash, cap, breaker, screened):
     if not stopped and len(positions) < MAX_POSITIONS:
         cands = [c for c in screened if c["code"] not in positions]
         cands = analyst.apply(cands, analyst.analyze(tname, cands))   # 팀장 분석; 부재 시 규칙 폴백
+        # 팀장이 실제로 낮게 본 후보만 보류. conviction=None(팀장 부재/무의견)이면 규칙 그대로 통과(안전원칙).
+        cands = [c for c in cands if keep_candidate(c)]
         cands.sort(key=lambda c: c.get("conviction") or 0, reverse=True)
         for c in cands:
             if len(positions) >= MAX_POSITIONS:
@@ -134,4 +143,12 @@ def run(n=40):
 
 
 if __name__ == "__main__":
-    run(int(sys.argv[1]) if len(sys.argv) > 1 else 40)
+    if len(sys.argv) > 1 and sys.argv[1] == "check":     # python team.py check → 네트워크 없이 필터만 점검
+        assert keep_candidate({"code": "A"})                          # 팀장 부재(키 없음) → 통과(안전원칙)
+        assert keep_candidate({"code": "A", "conviction": None})      # 팀장 무의견 → 통과(안전원칙)
+        assert keep_candidate({"code": "A", "conviction": 0.8})       # 확신 높음 → 통과
+        assert keep_candidate({"code": "A", "conviction": 0.5})       # 경계값(=CONV_MIN) → 통과
+        assert not keep_candidate({"code": "A", "conviction": 0.3})   # 확신 낮음 → 보류
+        print("[PASS] team 매수 후보 확신도 필터 점검 통과")
+    else:
+        run(int(sys.argv[1]) if len(sys.argv) > 1 else 40)
